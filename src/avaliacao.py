@@ -1,8 +1,8 @@
-"""Avaliação dos modelos no conjunto de teste."""
+"""Etapa 6: medir como cada modelo foi no conjunto de teste."""
 
 import matplotlib
 
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # salva os gráficos em arquivo, sem abrir janela
 import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.metrics import (
@@ -13,50 +13,67 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
-from sklearn.pipeline import Pipeline
 
 from src.config import PASTA_SAIDAS
 from src.traducao import traduzir_feature
 
+# Nome do arquivo de imagem da matriz de confusão de cada modelo
+ARQUIVOS_MATRIZ = {
+    "Regressão Logística": "matriz_confusao_regressao_logistica.png",
+    "Random Forest": "matriz_confusao_random_forest.png",
+}
 
-def avaliar_modelo(nome: str, modelo: Pipeline, X_teste: pd.DataFrame, y_teste: pd.Series) -> dict:
-    """Calcula as métricas, mostra a matriz de confusão e salva a imagem dela."""
-    y_pred = modelo.predict(X_teste)
 
+def avaliar_modelo(nome, modelo, X_teste, y_teste):
+    """Calcula as métricas do modelo e salva a matriz de confusão."""
+    # O modelo "chuta" quem sobreviveu no teste...
+    y_previsto = modelo.predict(X_teste)
+
+    # ...e comparamos com a resposta certa (y_teste)
     metricas = {
         "Modelo": nome,
-        "Acurácia": accuracy_score(y_teste, y_pred),
-        "Precisão": precision_score(y_teste, y_pred),
-        "Recall": recall_score(y_teste, y_pred),
-        "F1": f1_score(y_teste, y_pred),
+        "Acurácia": accuracy_score(y_teste, y_previsto),   # % de acertos no total
+        "Precisão": precision_score(y_teste, y_previsto),  # dos que ele disse "sobreviveu", quantos sobreviveram
+        "Recall": recall_score(y_teste, y_previsto),       # dos que sobreviveram, quantos ele achou
+        "F1": f1_score(y_teste, y_previsto),               # equilíbrio entre precisão e recall
     }
 
-    matriz = confusion_matrix(y_teste, y_pred)
+    # Matriz de confusão: onde o modelo acertou e onde errou
+    matriz = confusion_matrix(y_teste, y_previsto)
     print(f"\n--- {nome} ---")
     print("Matriz de confusão (linhas = real, colunas = previsto):")
-    print(pd.DataFrame(matriz, index=["Real: Não sobreviveu", "Real: Sobreviveu"],
-                       columns=["Prev: Não sobreviveu", "Prev: Sobreviveu"]).to_string())
+    tabela = pd.DataFrame(
+        matriz,
+        index=["Real: Não sobreviveu", "Real: Sobreviveu"],
+        columns=["Prev: Não sobreviveu", "Prev: Sobreviveu"],
+    )
+    print(tabela.to_string())
 
-    # Salva a matriz de confusão como imagem
+    salvar_matriz_confusao(nome, matriz)
+    return metricas
+
+
+def salvar_matriz_confusao(nome, matriz):
+    """Salva a matriz de confusão como imagem em outputs/."""
     fig, ax = plt.subplots(figsize=(5.5, 4))
-    ConfusionMatrixDisplay(matriz, display_labels=["Não sobreviveu", "Sobreviveu"]).plot(ax=ax, cmap="Blues", colorbar=False)
+    grafico = ConfusionMatrixDisplay(matriz, display_labels=["Não sobreviveu", "Sobreviveu"])
+    grafico.plot(ax=ax, cmap="Blues", colorbar=False)
     ax.set_title(f"Matriz de confusão - {nome}")
     ax.set_xlabel("Previsto")
     ax.set_ylabel("Real")
     fig.tight_layout()
-    nome_arquivo = nome.lower().replace(" ", "_").replace("ã", "a").replace("í", "i")
-    fig.savefig(PASTA_SAIDAS / f"matriz_confusao_{nome_arquivo}.png", dpi=100)
+    fig.savefig(PASTA_SAIDAS / ARQUIVOS_MATRIZ[nome], dpi=100)
     plt.close(fig)
 
-    return metricas
 
-
-def importancia_features(modelo: Pipeline, top: int = 15) -> pd.Series:
-    """Pega as features mais importantes do Random Forest e salva um gráfico."""
+def importancia_features(modelo, top=15):
+    """Mostra quais colunas mais pesaram na decisão do Random Forest e salva um gráfico."""
+    # Nomes das colunas depois do pré-processamento (ex.: "Age", "Sex_male")
     nomes = modelo.named_steps["preprocessamento"].get_feature_names_out()
-    importancias = pd.Series(modelo.named_steps["modelo"].feature_importances_, index=nomes)
-    # Tira os prefixos "num__" e "cat__" e traduz para português
-    importancias.index = [traduzir_feature(n.split("__", 1)[1]) for n in importancias.index]
+    # Quanto cada coluna ajudou nas decisões das árvores
+    valores = modelo.named_steps["modelo"].feature_importances_
+
+    importancias = pd.Series(valores, index=[traduzir_feature(n) for n in nomes])
     importancias = importancias.sort_values(ascending=False).head(top)
 
     fig, ax = plt.subplots(figsize=(8, 6))
